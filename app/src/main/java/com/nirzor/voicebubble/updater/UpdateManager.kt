@@ -338,7 +338,11 @@ class UpdateManager(private val context: Context) {
                 }
 
                 cachedApkFile = apkFile
+                // The user already selected "Download & Install". Continue directly
+                // to PackageInstaller after the downloaded APK passes SHA-256 validation.
                 _status.value = UpdateStatus.ReadyToInstall(apkFile)
+                Log.i(TAG, "APK download and checksum verification succeeded; starting installation")
+                installApk(apkFile)
 
             } catch (e: Exception) {
                 Log.e(TAG, "Download failed", e)
