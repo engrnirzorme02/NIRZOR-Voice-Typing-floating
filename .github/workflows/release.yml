@@ -82,8 +82,6 @@ jobs:
           ./gradlew assembleRelease -PversionName=${{ env.VERSION_NAME }} --stacktrace
 
       - name: Verify update signing compatibility
-        env:
-          APKSIGNER_HOME: ${{ env.ANDROID_HOME }}
         run: |
           set -euo pipefail
           APK_FILE=$(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -n 1)
@@ -92,12 +90,32 @@ jobs:
             exit 1
           fi
 
-          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
-          APKSIGNER=$(find "$SDK_ROOT/build-tools" -type f -name apksigner 2>/dev/null | sort -V | tail -n 1)
+          echo "ANDROID_HOME=${ANDROID_HOME:-<unset>}"
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-<unset>}"
+          APKSIGNER="$(command -v apksigner 2>/dev/null || true)"
+
           if [ -z "$APKSIGNER" ]; then
+            for SDK_ROOT in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}" \
+              "/usr/local/lib/android/sdk" "/usr/lib/android-sdk" \
+              "/opt/android-sdk" "/home/runner/Android/Sdk" \
+              "/opt/hostedtoolcache/android-sdk"; do
+              if [ -n "$SDK_ROOT" ] && [ -d "$SDK_ROOT" ]; then
+                APKSIGNER=$(find "$SDK_ROOT" -name apksigner 2>/dev/null | sort -V | tail -n 1)
+                if [ -n "$APKSIGNER" ]; then break; fi
+              fi
+            done
+          fi
+
+          if [ -z "$APKSIGNER" ]; then
+            # Last-resort search for SDKs installed outside the standard runner paths.
+            APKSIGNER=$(find / -name apksigner 2>/dev/null | sort -V | tail -n 1 || true)
+          fi
+
+          if [ -z "$APKSIGNER" ] || [ ! -x "$APKSIGNER" ]; then
             echo "::error::Android apksigner could not be found; refusing to publish an unverified update."
             exit 1
           fi
+          echo "Using apksigner: $APKSIGNER"
 
           cert_digest() {
             "$APKSIGNER" verify --print-certs "$1" 2>/dev/null |
