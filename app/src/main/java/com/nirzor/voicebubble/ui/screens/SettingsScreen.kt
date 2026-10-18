@@ -6,6 +6,8 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -139,6 +141,24 @@ fun SettingsScreen(
     val updateStatus by updateManager.status.collectAsState()
     var showUnknownSourcesDialog by remember { mutableStateOf(false) }
     var pendingUpdateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
+    val unknownSourcesSettingsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) {
+        val info = pendingUpdateInfo
+        pendingUpdateInfo = null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            context.packageManager.canRequestPackageInstalls()
+        ) {
+            // Resume the requested update automatically after the user grants the install permission.
+            if (info != null) updateManager.startDownload(info)
+        } else {
+            Toast.makeText(
+                context,
+                "Voice Bubble-এর জন্য 'Install unknown apps' অনুমতি চালু করে আবার চেষ্টা করুন।",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
 
     Column(
         modifier = modifier
@@ -747,7 +767,10 @@ fun SettingsScreen(
 
     if (showUnknownSourcesDialog) {
         AlertDialog(
-            onDismissRequest = { showUnknownSourcesDialog = false },
+            onDismissRequest = {
+                showUnknownSourcesDialog = false
+                pendingUpdateInfo = null
+            },
             title = { Text(stringResource(R.string.updater_perm_dialog_title)) },
             text = { Text(stringResource(R.string.updater_perm_dialog_body)) },
             confirmButton = {
@@ -759,7 +782,7 @@ fun SettingsScreen(
                                 Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                                 Uri.parse("package:${context.packageName}")
                             )
-                            context.startActivity(intent)
+                            unknownSourcesSettingsLauncher.launch(intent)
                         }
                     }
                 ) {
@@ -767,7 +790,10 @@ fun SettingsScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showUnknownSourcesDialog = false }) {
+                TextButton(onClick = {
+                    showUnknownSourcesDialog = false
+                    pendingUpdateInfo = null
+                }) {
                     Text(stringResource(R.string.history_clear_cancel))
                 }
             }
