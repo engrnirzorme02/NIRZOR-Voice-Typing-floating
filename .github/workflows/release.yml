@@ -2,8 +2,10 @@ name: Build & Release Voice Bubble APK
 
 on:
   push:
+    branches:
+      - 'release/v*' # Release branch push করে সংস্করণ প্রকাশ
     tags:
-      - 'v*' # যেমন: v1.0.0, v1.0.1 পুশ করলেই এটি চলবে
+      - 'v*' # যেমন: v1.0.1 ট্যাগ পুশ করলেও চলবে
   workflow_dispatch:
     inputs:
       version_tag:
@@ -47,12 +49,28 @@ jobs:
             TAG_NAME="${{ github.event.inputs.version_tag }}"
           elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
             TAG_NAME="${GITHUB_REF#refs/tags/}"
+          elif [[ "$GITHUB_REF" == refs/heads/release/v* ]]; then
+            TAG_NAME="${GITHUB_REF#refs/heads/release/}"
           else
-            TAG_NAME="v1.0.0"
+            echo "::error::Unable to determine release tag from ref: $GITHUB_REF"
+            exit 1
           fi
           VERSION_NAME="${TAG_NAME#v}"
           echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_ENV
           echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
+
+      - name: Validate Stable Signing Key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "::error::A stable release keystore must be configured in repository secrets before publishing an in-app update."
+            exit 1
+          fi
+          echo "Stable release signing secrets are configured."
 
       - name: Setup Keystore
         env:
@@ -92,13 +110,14 @@ jobs:
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        if: startsWith(github.ref, 'refs/tags/') || startsWith(github.ref, 'refs/heads/release/v') || github.event_name == 'workflow_dispatch'
         with:
           files: |
             release-artifacts/voicebubble.apk
             release-artifacts/voicebubble.apk.sha256
           name: Release ${{ env.TAG_NAME }}
           tag_name: ${{ env.TAG_NAME }}
+          target_commitish: ${{ github.sha }}
           draft: false
           prerelease: false
           generate_release_notes: true
