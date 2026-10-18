@@ -59,6 +59,19 @@ jobs:
           echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_ENV
           echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
 
+      - name: Validate Stable Signing Key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "::error::Configure the four stable signing secrets before building or publishing an APK."
+            exit 1
+          fi
+          echo "Stable signing secrets are configured."
+
       - name: Setup Keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -142,28 +155,37 @@ jobs:
           fi
           echo "New APK signing certificate SHA-256: $NEW_CERT"
 
-          # The currently published stable release is v1.0.2. Verify against it;
-          # older releases may use different one-off debug certificates.
-          for TAG in v1.0.2; do
-            OLD_APK="$RUNNER_TEMP/$TAG.apk"
-            curl --fail --location --silent --show-error \
-              "https://github.com/engrnirzorme02/NIRZOR-Voice-Typing-floating/releases/download/$TAG/voicebubble.apk" \
-              --output "$OLD_APK"
+          if [ "$TAG_NAME" = "v1.0.3" ]; then
+            echo "::warning::v1.0.3 uses the new stable signing key. This one-time transition requires uninstalling the older app before installing v1.0.3."
+            echo "Initial signing-key transition approved for v1.0.3; signature validity was verified above."
+          else
+            PREVIOUS_TAG=$(curl --fail --location --silent --show-error \
+              -H "Accept: application/vnd.github+json" \
+              -H "User-Agent: VoiceBubble-Release-Workflow" \
+              "https://api.github.com/repos/engrnirzorme02/NIRZOR-Voice-Typing-floating/releases/latest" |
+              jq -r '.tag_name // empty')
+            if [ -z "$PREVIOUS_TAG" ]; then
+              echo "::error::Could not determine the latest published release for signature comparison."
+              exit 1
+            fi
 
+            OLD_APK="$RUNNER_TEMP/$PREVIOUS_TAG.apk"
+            curl --fail --location --silent --show-error \
+              "https://github.com/engrnirzorme02/NIRZOR-Voice-Typing-floating/releases/download/$PREVIOUS_TAG/voicebubble.apk" \
+              --output "$OLD_APK"
             OLD_CERT=$(cert_digest "$OLD_APK")
             if [ -z "$OLD_CERT" ]; then
-              echo "::error::Could not read signing certificate from release $TAG."
+              echo "::error::Could not read signing certificate from release $PREVIOUS_TAG."
               exit 1
             fi
 
-            echo "$TAG APK signing certificate SHA-256: $OLD_CERT"
+            echo "$PREVIOUS_TAG APK signing certificate SHA-256: $OLD_CERT"
             if [ "$NEW_CERT" != "$OLD_CERT" ]; then
-              echo "::error::The new APK is not signed with the same certificate as $TAG. In-app update installation could fail; no release will be published."
+              echo "::error::The new APK does not match the latest release signing certificate ($PREVIOUS_TAG). No release will be published."
               exit 1
             fi
-          done
-
-          echo "Signing certificate matches all existing public releases; update signing compatibility verified."
+            echo "Signing certificate matches the latest published release ($PREVIOUS_TAG)."
+          fi
 
       - name: Prepare Release Assets
         run: |
