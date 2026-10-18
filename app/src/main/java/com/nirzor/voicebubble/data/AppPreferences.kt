@@ -60,7 +60,7 @@ class AppPreferences(context: Context) {
     private val _dockToEdge = MutableStateFlow(prefs.getBoolean(KEY_DOCK_TO_EDGE, true))
     val dockToEdge: StateFlow<Boolean> = _dockToEdge.asStateFlow()
 
-    private val _keepBubbleAlwaysOn = MutableStateFlow(prefs.getBoolean(KEY_KEEP_ALWAYS_ON, false))
+    private val _keepBubbleAlwaysOn = MutableStateFlow(prefs.getBoolean(KEY_KEEP_ALWAYS_ON, true))
     val keepBubbleAlwaysOn: StateFlow<Boolean> = _keepBubbleAlwaysOn.asStateFlow()
 
     private val _startListeningFromTile = MutableStateFlow(prefs.getBoolean(KEY_START_FROM_TILE, true))
