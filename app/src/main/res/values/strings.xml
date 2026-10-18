@@ -129,7 +129,7 @@
     <string name="settings_dock_edge_title">স্ক্রিন প্রান্তে ডকিং (Dock to Edge)</string>
     <string name="settings_dock_edge_desc">ছেড়ে দিলে বাবলটি নিজে থেকেই স্ক্রিনের কাছাকাছি প্রান্তে লেগে থাকবে</string>
     <string name="settings_always_on_title">বাবল সর্বদা চালু রাখুন (Keep Bubble Always On)</string>
-    <string name="settings_always_on_desc">নিষ্ক্রিয় অবস্থায় ১৫ সেকেন্ড পর অটো-ডিসমিস হবে না</string>
+    <string name="settings_always_on_desc">চালু থাকলে নিষ্ক্রিয় অবস্থাতেও বাবল বন্ধ হবে না</string>
     <string name="settings_tile_start_mic_title">টাইল থেকে সরাসরি লিসেনিং শুরু (Start Listening from Tile)</string>
     <string name="settings_tile_start_mic_desc">কুইক সেটিংস টাইল ট্যাপ করলেই সাথে সাথে মাইক্রোফোন চালু হবে</string>
     <string name="settings_reset_pos_title">পজিশন রিসেট করুন</string>
@@ -158,7 +158,7 @@
     <string name="gemini_test_btn_testing">যাচাই করা হচ্ছে...</string>
     <string name="gemini_test_valid">✓ API Key বৈধ ও কার্যকর!</string>
     <string name="gemini_test_invalid">❌ API Key অবৈধ বা মেয়াদোত্তীর্ণ!</string>
-    <string name="gemini_test_network_error">⚠️ নেটওয়ার্ক ত্রুটি! ইন্টারনেট কানেকশন চেক করুন।</string>
+    <string name="gemini_test_network_error">⚠️ API অনুরোধের সময়সীমা পেরিয়ে গেছে বা সংযোগে সমস্যা। আবার চেষ্টা করুন।</string>
     <string name="gemini_direct_audio_title">Direct Gemini Audio (Experimental / পরীক্ষামূলক)</string>
     <string name="gemini_direct_audio_desc">স্পিচ রিকগনাইজারের বদলে সরাসরি অডিও পাঠিয়ে ট্রান্সক্রিপশন (পরিকল্পিত)</string>
     <string name="gemini_direct_audio_disabled_notice">বর্তমানে পরীক্ষামূলক পর্যায়ে রয়েছে (Default OFF)</string>
