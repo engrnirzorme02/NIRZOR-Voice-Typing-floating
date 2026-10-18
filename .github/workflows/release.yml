@@ -84,11 +84,13 @@ jobs:
       - name: Verify update signing compatibility
         run: |
           set -euo pipefail
-          APK_FILE=$(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -n 1)
+          APK_FILE=$(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' ! -iname '*unsigned*' | sort | head -n 1)
           if [ -z "$APK_FILE" ]; then
-            echo "::error::Release APK was not produced."
+            echo "::error::A signed Release APK was not produced."
+            find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print || true
             exit 1
           fi
+          echo "Checking signed APK: $APK_FILE"
 
           echo "ANDROID_HOME=${ANDROID_HOME:-<unset>}"
           echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-<unset>}"
@@ -118,13 +120,24 @@ jobs:
           echo "Using apksigner: $APKSIGNER"
 
           cert_digest() {
-            "$APKSIGNER" verify --print-certs "$1" 2>/dev/null |
+            local APK_PATH="$1"
+            local VERIFY_OUTPUT
+            VERIFY_OUTPUT=$("$APKSIGNER" verify --print-certs "$APK_PATH" 2>&1) || {
+              echo "::error::apksigner could not verify $APK_PATH" >&2
+              printf '%s\n' "$VERIFY_OUTPUT" >&2
+              return 1
+            }
+            printf '%s\n' "$VERIFY_OUTPUT" |
               awk -F': ' '/Signer #1 certificate SHA-256 digest/ { print $2; exit }'
           }
 
-          NEW_CERT=$(cert_digest "$APK_FILE")
+          NEW_CERT=$(cert_digest "$APK_FILE") || {
+            echo "::error::Could not verify the new APK signature."
+            exit 1
+          }
           if [ -z "$NEW_CERT" ]; then
-            echo "::error::Could not read the new APK signing certificate."
+            echo "::error::apksigner output did not contain a SHA-256 certificate digest for the new APK."
+            "$APKSIGNER" verify --print-certs "$APK_FILE" 2>&1 || true
             exit 1
           fi
           echo "New APK signing certificate SHA-256: $NEW_CERT"
@@ -153,9 +166,10 @@ jobs:
       - name: Prepare Release Assets
         run: |
           mkdir -p release-artifacts
-          APK_FILE=$(ls app/build/outputs/apk/release/*.apk | head -n 1)
+          APK_FILE=$(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' ! -iname '*unsigned*' | sort | head -n 1)
           if [ -z "$APK_FILE" ]; then
-            echo "ERROR: Release APK not found!"
+            echo "ERROR: Signed Release APK not found!"
+            find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print || true
             exit 1
           fi
           cp "$APK_FILE" release-artifacts/voicebubble.apk
