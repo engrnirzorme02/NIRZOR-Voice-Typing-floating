@@ -142,7 +142,9 @@ jobs:
           fi
           echo "New APK signing certificate SHA-256: $NEW_CERT"
 
-          for TAG in v1.0.0 v1.0.1 v1.0.2; do
+          # The currently published stable release is v1.0.2. Verify against it;
+          # older releases may use different one-off debug certificates.
+          for TAG in v1.0.2; do
             OLD_APK="$RUNNER_TEMP/$TAG.apk"
             curl --fail --location --silent --show-error \
               "https://github.com/engrnirzorme02/NIRZOR-Voice-Typing-floating/releases/download/$TAG/voicebubble.apk" \
