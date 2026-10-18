@@ -128,7 +128,7 @@ jobs:
               return 1
             }
             printf '%s\n' "$VERIFY_OUTPUT" |
-              awk -F': ' '/Signer #1 certificate SHA-256 digest/ { print $2; exit }'
+              awk '/certificate SHA-256 digest:/ { print $NF; exit }'
           }
 
           NEW_CERT=$(cert_digest "$APK_FILE") || {
