@@ -74,9 +74,11 @@
     <string name="bubble_remove_target">বন্ধ করতে এখানে টানুন</string>
 
     <!-- Speech Recognizer Error Messages (Bangla) -->
-    <string name="speech_err_network_timeout">নেটওয়ার্ক টাইমআউট হয়েছে। আবার চেষ্টা করুন।</string>
-    <string name="speech_err_network">নেটওয়ার্ক সমস্যা! ইন্টারনেট কানেকশন চেক করুন বা অফলাইন ডাটা ব্যবহার করুন।</string>
-    <string name="speech_err_offline_unavailable">অনলাইন ও অফলাইন—দুই ধরনের স্পিচ রিকগনিশনই ব্যর্থ হয়েছে। Google Speech Services চালু করুন এবং এই ভাষার অফলাইন মডেল ডাউনলোড আছে কি না দেখুন।</string>
+    <string name="speech_err_network_timeout">স্পিচ সার্ভিস সময়মতো সাড়া দেয়নি। আবার চেষ্টা করুন এবং ইন্টারনেট সংযোগ পরীক্ষা করুন।</string>
+    <string name="speech_err_network">ভয়েস শনাক্তকরণ সার্ভিসে সংযোগ করা যায়নি। ইন্টারনেট চালু আছে কি না দেখুন; Google app বা Speech Services আপডেট করুন। সমস্যা থাকলে নির্বাচিত ভাষার অফলাইন স্পিচ মডেল ইনস্টল করুন।</string>
+    <string name="speech_retrying_network">স্পিচ সার্ভিসে সাময়িক সংযোগ সমস্যা—আবার চেষ্টা করছি...</string>
+    <string name="speech_retrying_offline">অনলাইন শনাক্তকরণ ব্যর্থ—ডিভাইসের অফলাইন স্পিচ মডেল দিয়ে চেষ্টা করছি...</string>
+    <string name="speech_err_offline_unavailable">অনলাইন শনাক্তকরণ ব্যর্থ হয়েছে এবং ডিভাইসে ব্যবহারযোগ্য অফলাইন স্পিচ সেবা পাওয়া যায়নি। Google Speech Services চালু/আপডেট করুন এবং নির্বাচিত ভাষার অফলাইন মডেল ডাউনলোড করুন।</string>
     <string name="speech_err_audio">অডিও রেকর্ডিং এরর। মাইক্রোফোন চেক করুন।</string>
     <string name="speech_err_server">সার্ভার এরর (Google Speech Server error)।</string>
     <string name="speech_err_client">ক্লায়েন্ট সাইড এরর।</string>
