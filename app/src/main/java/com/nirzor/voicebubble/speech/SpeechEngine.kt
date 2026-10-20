@@ -39,7 +39,11 @@ class SpeechEngine(private val context: Context) {
 
     private var speechRecognizer: SpeechRecognizer? = null
     private var startTimeMs: Long = 0L
+    private var recognizerStartJob: Job? = null
+    private var startRequestId = 0L
+    private var isStartPending = false
     private var hasRetriedBusy = false
+    private var hasRetriedOnline = false
     private var hasRetriedOnDevice = false
     private var toneGenerator: ToneGenerator? = null
     private var vibrator: Vibrator? = null
@@ -86,14 +90,14 @@ class SpeechEngine(private val context: Context) {
         onFinalResult: ((rawText: String, lang: String, durationMs: Long) -> Unit)? = null,
         onErrorOccurred: ((errorMessage: String, errorCode: Int) -> Unit)? = null
     ) {
-        // Let users retry immediately after a terminal error or completed result.
+        // Reserve the state immediately so rapid taps cannot queue parallel recognizers.
         when (stateMachine.state.value) {
             is BubbleState.Error, is BubbleState.Done -> stateMachine.resetToIdle()
             else -> Unit
         }
 
-        if (!stateMachine.canAcceptTap()) {
-            Log.d(TAG, "Taps ignored while recognition is still active")
+        if (isStartPending || !stateMachine.canAcceptTap()) {
+            Log.d(TAG, "Ignoring tap while a speech session is starting or active")
             return
         }
 
@@ -117,14 +121,45 @@ class SpeechEngine(private val context: Context) {
             return
         }
 
+        if (!stateMachine.startListening()) return
+
         hasRetriedBusy = false
+        hasRetriedOnline = false
         hasRetriedOnDevice = false
 
-        // Cancel & destroy old recognizer on main looper, wait ~300ms, then launch new session
         cleanupRecognizer()
+        scheduleRecognizerStart(
+            delayMillis = 300L,
+            languageCode = languageCode,
+            playTone = playTone,
+            enableHaptic = enableHaptic,
+            onPartialResult = onPartialResult,
+            onFinalResult = onFinalResult,
+            onErrorOccurred = onErrorOccurred,
+            isRetry = false,
+            forceOnDevice = !defaultRecognizerAvailable
+        )
+    }
 
-        scope.launch {
-            delay(300L)
+    private fun scheduleRecognizerStart(
+        delayMillis: Long,
+        languageCode: String,
+        playTone: Boolean,
+        enableHaptic: Boolean,
+        onPartialResult: ((String) -> Unit)?,
+        onFinalResult: ((rawText: String, lang: String, durationMs: Long) -> Unit)?,
+        onErrorOccurred: ((errorMessage: String, errorCode: Int) -> Unit)?,
+        isRetry: Boolean,
+        forceOnDevice: Boolean
+    ) {
+        recognizerStartJob?.cancel()
+        val requestId = ++startRequestId
+        isStartPending = true
+
+        recognizerStartJob = scope.launch {
+            delay(delayMillis)
+            if (requestId != startRequestId) return@launch
+
             internalStartRecognizer(
                 languageCode = languageCode,
                 playTone = playTone,
@@ -132,10 +167,18 @@ class SpeechEngine(private val context: Context) {
                 onPartialResult = onPartialResult,
                 onFinalResult = onFinalResult,
                 onErrorOccurred = onErrorOccurred,
-                isRetry = false,
-                forceOnDevice = !defaultRecognizerAvailable
+                isRetry = isRetry,
+                forceOnDevice = forceOnDevice,
+                requestId = requestId
             )
         }
+    }
+
+    private fun invalidatePendingStart() {
+        startRequestId += 1
+        recognizerStartJob?.cancel()
+        recognizerStartJob = null
+        isStartPending = false
     }
 
     private fun internalStartRecognizer(
@@ -146,15 +189,21 @@ class SpeechEngine(private val context: Context) {
         onFinalResult: ((rawText: String, lang: String, durationMs: Long) -> Unit)?,
         onErrorOccurred: ((errorMessage: String, errorCode: Int) -> Unit)?,
         isRetry: Boolean,
-        forceOnDevice: Boolean
+        forceOnDevice: Boolean,
+        requestId: Long
     ) {
         mainHandler.post {
+            // Delayed callbacks from an older attempt must not start or overwrite a newer session.
+            if (requestId != startRequestId || !isStartPending) return@post
+            isStartPending = false
+            recognizerStartJob = null
+
             if (isRetry) {
                 if (!stateMachine.restartListening()) {
                     Log.w(TAG, "Skipping recognizer retry because the session is no longer active")
                     return@post
                 }
-            } else if (!stateMachine.startListening()) {
+            } else if (stateMachine.state.value !is BubbleState.Listening) {
                 return@post
             }
 
@@ -199,6 +248,7 @@ class SpeechEngine(private val context: Context) {
                         }
 
                         override fun onRmsChanged(rmsdB: Float) {
+                            if (requestId != startRequestId) return
                             val normalized = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
                             stateMachine.updateRms(normalized)
                         }
@@ -206,26 +256,31 @@ class SpeechEngine(private val context: Context) {
                         override fun onBufferReceived(buffer: ByteArray?) {}
 
                         override fun onEndOfSpeech() {
+                            if (requestId != startRequestId) return
                             Log.d(TAG, "SpeechRecognizer onEndOfSpeech")
                             stateMachine.moveToProcessing()
                         }
 
                         override fun onError(error: Int) {
-                            Log.e(TAG, "SpeechRecognizer onError: $error")
+                            if (requestId != startRequestId) return
+                            Log.e(TAG, "SpeechRecognizer onError: code=$error, language=$languageCode, onDevice=$forceOnDevice")
 
-                            // Retry once on ERROR_RECOGNIZER_BUSY (error 8)
+                            // Retry one busy-service error without allowing overlapping start jobs.
                             if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY && !hasRetriedBusy) {
                                 hasRetriedBusy = true
                                 cleanupRecognizer()
-                                scope.launch {
-                                    delay(400L)
-                                    internalStartRecognizer(
-                                        languageCode, playTone, enableHaptic,
-                                        onPartialResult, onFinalResult, onErrorOccurred,
-                                        isRetry = true,
-                                        forceOnDevice = forceOnDevice
-                                    )
-                                }
+                                onErrorOccurred?.invoke(context.getString(R.string.speech_err_busy), error)
+                                scheduleRecognizerStart(
+                                    delayMillis = 400L,
+                                    languageCode = languageCode,
+                                    playTone = playTone,
+                                    enableHaptic = enableHaptic,
+                                    onPartialResult = onPartialResult,
+                                    onFinalResult = onFinalResult,
+                                    onErrorOccurred = onErrorOccurred,
+                                    isRetry = true,
+                                    forceOnDevice = forceOnDevice
+                                )
                                 return
                             }
 
@@ -233,6 +288,31 @@ class SpeechEngine(private val context: Context) {
                                 error == SpeechRecognizer.ERROR_NETWORK ||
                                     error == SpeechRecognizer.ERROR_NETWORK_TIMEOUT ||
                                     error == SpeechRecognizer.ERROR_SERVER
+
+                            // A brief online retry recovers transient Speech Services failures.
+                            // If it fails again, try the on-device recognizer when Android exposes one.
+                            if (!forceOnDevice && isNetworkFailure && !hasRetriedOnline) {
+                                hasRetriedOnline = true
+                                Log.w(TAG, "Speech service network failure; retrying online once")
+                                cleanupRecognizer()
+                                onErrorOccurred?.invoke(
+                                    context.getString(R.string.speech_retrying_network),
+                                    error
+                                )
+                                scheduleRecognizerStart(
+                                    delayMillis = 500L,
+                                    languageCode = languageCode,
+                                    playTone = playTone,
+                                    enableHaptic = enableHaptic,
+                                    onPartialResult = onPartialResult,
+                                    onFinalResult = onFinalResult,
+                                    onErrorOccurred = onErrorOccurred,
+                                    isRetry = true,
+                                    forceOnDevice = false
+                                )
+                                return
+                            }
+
                             if (
                                 !forceOnDevice &&
                                 !hasRetriedOnDevice &&
@@ -240,17 +320,23 @@ class SpeechEngine(private val context: Context) {
                                 isOnDeviceRecognitionAvailable()
                             ) {
                                 hasRetriedOnDevice = true
-                                Log.w(TAG, "Network speech recognition failed; retrying with on-device recognizer")
+                                Log.w(TAG, "Online speech retry failed; switching to on-device recognition")
                                 cleanupRecognizer()
-                                scope.launch {
-                                    delay(350L)
-                                    internalStartRecognizer(
-                                        languageCode, playTone, enableHaptic,
-                                        onPartialResult, onFinalResult, onErrorOccurred,
-                                        isRetry = true,
-                                        forceOnDevice = true
-                                    )
-                                }
+                                onErrorOccurred?.invoke(
+                                    context.getString(R.string.speech_retrying_offline),
+                                    error
+                                )
+                                scheduleRecognizerStart(
+                                    delayMillis = 350L,
+                                    languageCode = languageCode,
+                                    playTone = playTone,
+                                    enableHaptic = enableHaptic,
+                                    onPartialResult = onPartialResult,
+                                    onFinalResult = onFinalResult,
+                                    onErrorOccurred = onErrorOccurred,
+                                    isRetry = true,
+                                    forceOnDevice = true
+                                )
                                 return
                             }
 
@@ -259,6 +345,8 @@ class SpeechEngine(private val context: Context) {
                             } else {
                                 getErrorMessage(error)
                             }
+                            invalidatePendingStart()
+                            cleanupRecognizer()
                             stateMachine.moveToError(errorMsg, error)
                             if (enableHaptic) triggerHapticDouble()
                             onErrorOccurred?.invoke(errorMsg, error)
@@ -266,16 +354,20 @@ class SpeechEngine(private val context: Context) {
                         }
 
                         override fun onResults(results: Bundle?) {
+                            if (requestId != startRequestId) return
                             val duration = System.currentTimeMillis() - startTimeMs
                             val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                             val text = matches?.firstOrNull()?.trim() ?: ""
 
                             if (text.isNotBlank()) {
+                                invalidatePendingStart()
                                 if (enableHaptic) triggerHapticSuccess()
                                 if (playTone) playBeep(ToneGenerator.TONE_PROP_ACK)
                                 onFinalResult?.invoke(text, languageCode, duration)
                             } else {
                                 val msg = context.getString(R.string.speech_err_no_match)
+                                invalidatePendingStart()
+                                cleanupRecognizer()
                                 stateMachine.moveToError(msg, SpeechRecognizer.ERROR_NO_MATCH)
                                 onErrorOccurred?.invoke(msg, SpeechRecognizer.ERROR_NO_MATCH)
                                 scheduleErrorReset()
@@ -283,6 +375,7 @@ class SpeechEngine(private val context: Context) {
                         }
 
                         override fun onPartialResults(partialResults: Bundle?) {
+                            if (requestId != startRequestId) return
                             val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                             val partial = matches?.firstOrNull()?.trim() ?: ""
                             if (partial.isNotBlank()) {
@@ -296,7 +389,10 @@ class SpeechEngine(private val context: Context) {
                     startListening(intent)
                 }
             } catch (e: Exception) {
+                if (requestId != startRequestId) return@post
                 Log.e(TAG, "Failed to start speech recognizer", e)
+                invalidatePendingStart()
+                cleanupRecognizer()
                 val errorMsg = context.getString(R.string.speech_err_unknown, -1)
                 stateMachine.moveToError(errorMsg, -1)
                 onErrorOccurred?.invoke(errorMsg, -1)
@@ -307,6 +403,13 @@ class SpeechEngine(private val context: Context) {
 
     fun stopSession() {
         mainHandler.post {
+            if (isStartPending) {
+                invalidatePendingStart()
+                cleanupRecognizer()
+                stateMachine.resetToIdle()
+                return@post
+            }
+
             try {
                 speechRecognizer?.stopListening()
             } catch (e: Exception) {
@@ -317,6 +420,7 @@ class SpeechEngine(private val context: Context) {
 
     fun cancelSession() {
         mainHandler.post {
+            invalidatePendingStart()
             cleanupRecognizer()
             stateMachine.resetToIdle()
         }
@@ -324,6 +428,7 @@ class SpeechEngine(private val context: Context) {
 
     fun destroy() {
         mainHandler.post {
+            invalidatePendingStart()
             cleanupRecognizer()
             stateMachine.resetToIdle()
             try {
