@@ -148,41 +148,68 @@ class FloatingBubbleService : Service() {
         updateScreenDimensions()
         createNotificationChannel()
 
-        // Phase B.3: Attach overlay view BEFORE calling startForeground
-        if (!isViewAttached && Settings.canDrawOverlays(this)) {
-            initBubbleLayout()
-            attachBubbleView()
-        }
-
+        // The foreground-service promotion must happen in onStartCommand before
+        // attempting the overlay attachment. Android can terminate a service that
+        // fails to become foreground within the required startup window.
         observeBubbleState()
         observeSettings()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
-            stopSelf()
+            stopSelf(startId)
             return START_NOT_STICKY
         }
 
-        _isServiceRunning.value = true
-
-        // Phase B.3: Start foreground service with microphone type (guarded by permission)
-        val notification = createNotification()
+        val hasOverlayPermission = Settings.canDrawOverlays(this)
         val hasMicPermission = androidx.core.content.ContextCompat.checkSelfPermission(
             this,
             android.Manifest.permission.RECORD_AUDIO
         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
-        val foregroundType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && hasMicPermission) {
+        if (!hasOverlayPermission || !hasMicPermission) {
+            Log.w(
+                TAG,
+                "Cannot start bubble: overlayPermission=$hasOverlayPermission, microphonePermission=$hasMicPermission"
+            )
+            _isServiceRunning.value = false
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+
+        val notification = createNotification()
+        val foregroundType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
         } else {
             0
         }
+
         try {
             ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, foregroundType)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start foreground service", e)
+            Log.e(TAG, "Failed to promote voice bubble to foreground service", e)
+            _isServiceRunning.value = false
+            stopSelf(startId)
+            return START_NOT_STICKY
         }
+
+        try {
+            if (floatingRootView == null) {
+                initBubbleLayout()
+            }
+            if (!attachBubbleView()) {
+                throw IllegalStateException("Floating bubble view could not be attached")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Bubble service started but overlay attachment failed", e)
+            _isServiceRunning.value = false
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+
+        // Publish the running state only after both foreground promotion and overlay
+        // attachment have succeeded. This keeps the Home switch and QS tile truthful.
+        _isServiceRunning.value = true
 
         val shouldStartListening = intent?.getBooleanExtra(EXTRA_START_LISTENING, false) ?: false
         if (shouldStartListening) {
@@ -783,14 +810,20 @@ class FloatingBubbleService : Service() {
         autoDismissJob = null
     }
 
-    private fun attachBubbleView() {
-        if (floatingRootView != null && !isViewAttached) {
-            try {
-                windowManager?.addView(floatingRootView, windowParams)
-                isViewAttached = true
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to attach floating bubble view", e)
-            }
+    private fun attachBubbleView(): Boolean {
+        if (isViewAttached) return true
+
+        val rootView = floatingRootView ?: return false
+        val manager = windowManager ?: return false
+
+        return try {
+            manager.addView(rootView, windowParams)
+            isViewAttached = true
+            true
+        } catch (e: Exception) {
+            isViewAttached = false
+            Log.e(TAG, "Failed to attach floating bubble view", e)
+            false
         }
     }
 
