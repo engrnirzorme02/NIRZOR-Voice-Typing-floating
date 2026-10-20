@@ -211,10 +211,28 @@ fun HomeScreen(
                     Switch(
                         checked = isServiceRunning,
                         onCheckedChange = { enabled ->
-                            if (enabled && (!hasOverlayPermission || !hasMicPermission)) {
-                                Toast.makeText(context, R.string.perm_required_alert, Toast.LENGTH_LONG).show()
+                            if (!enabled) {
+                                onToggleService(false)
                             } else {
-                                onToggleService(enabled)
+                                when {
+                                    !hasOverlayPermission -> {
+                                        Toast.makeText(
+                                            context,
+                                            R.string.perm_required_alert,
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                        onRequestOverlayPermission()
+                                    }
+                                    !hasMicPermission -> {
+                                        Toast.makeText(
+                                            context,
+                                            R.string.perm_required_alert,
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                        onRequestMicPermission()
+                                    }
+                                    else -> onToggleService(true)
+                                }
                             }
                         },
                         colors = SwitchDefaults.colors(
