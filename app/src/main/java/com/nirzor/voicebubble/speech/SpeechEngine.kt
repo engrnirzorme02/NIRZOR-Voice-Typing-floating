@@ -127,6 +127,8 @@ class SpeechEngine(private val context: Context) {
         hasRetriedOnline = false
         hasRetriedOnDevice = false
 
+        // Invalidate callbacks from the previous recognizer before cancelling it.
+        invalidatePendingStart()
         cleanupRecognizer()
         scheduleRecognizerStart(
             delayMillis = 300L,
@@ -268,6 +270,7 @@ class SpeechEngine(private val context: Context) {
                             // Retry one busy-service error without allowing overlapping start jobs.
                             if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY && !hasRetriedBusy) {
                                 hasRetriedBusy = true
+                                invalidatePendingStart()
                                 cleanupRecognizer()
                                 onErrorOccurred?.invoke(context.getString(R.string.speech_err_busy), error)
                                 scheduleRecognizerStart(
@@ -294,6 +297,7 @@ class SpeechEngine(private val context: Context) {
                             if (!forceOnDevice && isNetworkFailure && !hasRetriedOnline) {
                                 hasRetriedOnline = true
                                 Log.w(TAG, "Speech service network failure; retrying online once")
+                                invalidatePendingStart()
                                 cleanupRecognizer()
                                 onErrorOccurred?.invoke(
                                     context.getString(R.string.speech_retrying_network),
@@ -321,6 +325,7 @@ class SpeechEngine(private val context: Context) {
                             ) {
                                 hasRetriedOnDevice = true
                                 Log.w(TAG, "Online speech retry failed; switching to on-device recognition")
+                                invalidatePendingStart()
                                 cleanupRecognizer()
                                 onErrorOccurred?.invoke(
                                     context.getString(R.string.speech_retrying_offline),
